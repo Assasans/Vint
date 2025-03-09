@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Net;
-using System.Net.Sockets;
 using ConcurrentCollections;
 using LinqToDB;
 using Microsoft.Extensions.DependencyInjection;
@@ -1303,15 +1302,15 @@ public async Task UpdateDeserterStatus(bool roundEnded, bool hasEnemies) {
 public class SocketPlayerConnection(
     int id,
     IServiceScope serviceScope,
-    Socket socket
+    Stream socket
 ) : PlayerConnection(id, serviceScope.ServiceProvider) {
-    public IPEndPoint EndPoint { get; } = (IPEndPoint)socket.RemoteEndPoint!;
+    public IPEndPoint EndPoint { get; } = new(0, 0);
 
     public override bool IsLoggedIn => IsConnected && IsSocketConnected && ClientSession != null! && UserContainer != null! && Player != null!;
-    bool IsSocketConnected => Socket.Connected;
+    bool IsSocketConnected => true;
     bool IsConnected { get; set; }
 
-    Socket Socket { get; } = socket;
+    Stream Socket { get; } = socket;
     Protocol.Protocol Protocol { get; } = serviceScope.ServiceProvider.GetRequiredService<Protocol.Protocol>();
     GameServer Server { get; } = serviceScope.ServiceProvider.GetRequiredService<GameServer>();
 
@@ -1357,7 +1356,7 @@ public class SocketPlayerConnection(
             buffer.Wrap(writer);
 
             byte[] bytes = stream.ToArray();
-            await Socket.SendAsync(bytes);
+            await Socket.WriteAsync(bytes);
 
             Logger.Verbose("Sent {Command}: {Size} bytes ({Hex})", command, bytes.Length, Convert.ToHexString(bytes));
         } catch (Exception e) {
@@ -1369,7 +1368,7 @@ public class SocketPlayerConnection(
         if (!IsConnected) return;
 
         try {
-            Socket.Shutdown(SocketShutdown.Both);
+            // Socket.Shutdown(SocketShutdown.Both);
         } finally {
             Socket.Close();
             await OnDisconnected();
@@ -1434,8 +1433,7 @@ public class SocketPlayerConnection(
             return;
 
         try {
-            await using NetworkStream stream = new(Socket, FileAccess.Read);
-            using BinaryReader reader = new BigEndianBinaryReader(stream);
+            using BinaryReader reader = new BigEndianBinaryReader(Socket);
 
             while (true) {
                 await using ProtocolBuffer buffer = ProtocolBuffer.Unwrap(reader, this);

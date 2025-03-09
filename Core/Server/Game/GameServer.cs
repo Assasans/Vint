@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Vint.Core.Battle.Lobby;
@@ -27,8 +30,12 @@ public class GameServer(
 
     bool IsStarted { get; set; }
 
+    private X509Certificate2 _serverCertificate;
+
     public async Task Start() {
         if (IsStarted) return;
+
+        _serverCertificate = X509CertificateLoader.LoadPkcs12FromFile("Resources/Tls/server.pfx", "");
 
         IsStarted = true;
         Listener.Start();
@@ -46,7 +53,17 @@ public class GameServer(
                 IServiceScope serviceScope = serviceProvider.CreateAsyncScope();
 
                 Socket socket = await Listener.AcceptSocketAsync();
-                SocketPlayerConnection connection = new(id, serviceScope, socket);
+                NetworkStream networkStream = new(socket, true);
+                SslStream stream = new(networkStream, false);
+
+                Logger.Information("Starting TLS handshake for client {ClientId}", id);
+                await stream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions {
+                    ServerCertificate = _serverCertificate,
+                    RemoteCertificateValidationCallback = (sender, certificate, chain, errors) => true,
+                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+                });
+
+                SocketPlayerConnection connection = new(id, serviceScope, stream);
 
                 PlayerConnections[id] = connection;
                 await connection.OnConnected();
